@@ -1,0 +1,8 @@
+# Runtime configs
+config.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
