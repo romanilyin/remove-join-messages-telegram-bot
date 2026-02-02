@@ -35,17 +35,23 @@ BOT_TOKEN = config.get("telegram_token")
 if not BOT_TOKEN:
     raise ValueError("Поле 'telegram_token' отсутствует или пустое в config.json")
 
-# Admins management
+# Admins management (ИСПРАВЛЕНО: приведение всех ID к целым числам)
 def load_admins():
     if os.path.exists(ADMINS_FILE):
         with open(ADMINS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            admins = json.load(f)
+            # Приводим все ID к целым числам для единообразия
+            return [int(a) for a in admins if str(a).strip()]
+    # Fallback: use admins from config (only on first run)
     initial_admins = config.get("admins", [])
-    if initial_admins:
-        save_admins(initial_admins)
-    return initial_admins
+    # Приводим к целым числам
+    admins_normalized = [int(a) for a in initial_admins if str(a).strip()]
+    if admins_normalized:
+        save_admins(admins_normalized)
+    return admins_normalized
 
 def save_admins(admins):
+    # Сохраняем как список целых чисел
     with open(ADMINS_FILE, "w", encoding="utf-8") as f:
         json.dump(admins, f, ensure_ascii=False)
 
@@ -82,10 +88,10 @@ def save_pending_chats(chats):
     with open(PENDING_CHATS_FILE, "w", encoding="utf-8") as f:
         json.dump(chats, f, ensure_ascii=False)
 
-# Check if user is admin
+# Check if user is admin (ИСПРАВЛЕНО: сравнение чисел)
 def is_admin(user_id):
     admins = load_admins()
-    return str(user_id) in [str(a) for a in admins]
+    return int(user_id) in admins  # Сравниваем числа, а не строки
 
 # Check if chat is allowed
 def is_chat_allowed(chat_id):
@@ -258,7 +264,7 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         new_admin_id = int(context.args[0])
         admins = load_admins()
-        if str(new_admin_id) not in [str(a) for a in admins]:
+        if new_admin_id not in admins:  # Сравниваем числа напрямую
             admins.append(new_admin_id)
             save_admins(admins)
             await update.message.reply_text(f"Пользователь `{new_admin_id}` добавлен как администратор\\.", parse_mode='MarkdownV2')
