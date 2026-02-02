@@ -18,7 +18,6 @@ def escape_markdown_v2(text):
     """Escape special characters for Telegram MarkdownV2"""
     if not isinstance(text, str):
         text = str(text)
-    # Экранируем все спецсимволы
     return re.sub(f'([{re.escape(MDV2_SPECIAL_CHARS)}])', r'\\\1', text)
 
 # Load config.json
@@ -41,7 +40,6 @@ def load_admins():
     if os.path.exists(ADMINS_FILE):
         with open(ADMINS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    # Fallback: use admins from config (only on first run)
     initial_admins = config.get("admins", [])
     if initial_admins:
         save_admins(initial_admins)
@@ -97,7 +95,7 @@ def is_chat_allowed(chat_id):
 async def handle_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle new member joining the chat"""
     if not is_chat_allowed(update.effective_chat.id):
-        return  # Ignore if not in allowed chat
+        return
     
     if update.message and update.message.new_chat_members:
         message_id = update.message.id
@@ -114,7 +112,7 @@ async def delete_message(context):
     try:
         await context.bot.delete_message(chat_id=data['chat_id'], message_id=data['message_id'])
     except Exception:
-        pass  # Ignore errors (e.g., already deleted, no permissions)
+        pass
 
 async def add_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add current chat to allowed list (admin only)"""
@@ -190,7 +188,6 @@ async def list_pending_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if pending_users:
         for i, user in enumerate(pending_users, 1):
             escaped_name = escape_markdown_v2(user['name'])
-            # Важно: для команд в моноширинном шрифте используем одинарные обратные апострофы
             response += f"{i}\\. {escaped_name} \\(ID: `{user['id']}`\\) \\- `/adduser {user['id']}`\n"
         response += "\n"
     else:
@@ -203,7 +200,6 @@ async def list_pending_command(update: Update, context: ContextTypes.DEFAULT_TYP
             escaped_title = escape_markdown_v2(chat['title'])
             req = chat.get('requested_by', {})
             req_name = escape_markdown_v2(req.get('name', 'N/A')) if req else 'N/A'
-            # Экранируем только текст, но НЕ команды внутри ``
             response += f"{i}\\. {escaped_title} \\(ID: `{chat['id']}`\\) \\(запрос от {req_name}\\) \\- `/addchatid {chat['id']}`\n"
         response += "\n"
     else:
@@ -212,6 +208,39 @@ async def list_pending_command(update: Update, context: ContextTypes.DEFAULT_TYP
     response += "*Команды для добавления:*\n"
     response += "`/adduser <user\\_id>` — добавить пользователя из списка ожидания\\.\n"
     response += "`/addchatid <chat\\_id>` — добавить чат из списка ожидания\\."
+    
+    await update.message.reply_text(response, parse_mode='MarkdownV2')
+
+async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show info about admins and allowed chats (admin only)"""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("У вас нет прав для выполнения этой команды\\.", parse_mode='MarkdownV2')
+        return
+    
+    admins = load_admins()
+    allowed_chats = load_allowed_chats()
+    
+    response = "*📋 Информация о боте*\n\n"
+    
+    # Admins list
+    response += "*Администраторы:*\n"
+    if admins:
+        for i, admin_id in enumerate(admins, 1):
+            response += f"{i}\\. `{admin_id}`\n"
+    else:
+        response += "Нет администраторов\\.\n"
+    response += "\n"
+    
+    # Allowed chats list
+    response += "*Разрешённые чаты:*\n"
+    if allowed_chats:
+        for i, chat in enumerate(allowed_chats, 1):
+            escaped_title = escape_markdown_v2(chat['title'])
+            chat_id = chat['id']
+            response += f"{i}\\. {escaped_title} \\(ID: `{chat_id}`\\)\n"
+    else:
+        response += "Нет разрешённых чатов\\.\n"
     
     await update.message.reply_text(response, parse_mode='MarkdownV2')
 
@@ -306,6 +335,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Доступные команды:*\n"
         "`/addme` — запрос на добавление \\(для обычных пользователей\\)\n"
         "`/requestchat` — запрос на добавление текущего чата\n"
+        "`/info` — информация об админах и разрешённых чатах \\(только для админов\\)\n"
         "\n"
         "*Команды для администраторов:*\n"
         "`/addchat` — добавить текущий чат в список разрешённых\n"
@@ -325,11 +355,12 @@ def main():
     application.add_handler(CommandHandler("addme", add_me_command))
     application.add_handler(CommandHandler("requestchat", request_chat_command))
     application.add_handler(CommandHandler("listpending", list_pending_command))
+    application.add_handler(CommandHandler("info", info_command))
     application.add_handler(CommandHandler("addadmin", add_admin_command))
     application.add_handler(CommandHandler("adduser", add_user_command))
     application.add_handler(CommandHandler("addchatid", add_chat_id_command))
     
-    # New member handler (only processes messages in allowed chats)
+    # New member handler
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_members))
     
     application.run_polling()
