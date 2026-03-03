@@ -1,8 +1,16 @@
 import json
 import os
 import re
+import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+
+# Настройка логирования, чтобы ошибки были видны в systemd (journalctl)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # File paths for configs
 CONFIG_FILE = "config.json"
@@ -43,9 +51,9 @@ def load_admins():
             # Приводим все ID к целым числам для единообразия
             return [int(a) for a in admins if str(a).strip()]
     # Fallback: use admins from config (only on first run)
-    initial_admins = config.get("admins", [])
+    initial_admins = config.get("admins",[])
     # Приводим к целым числам
-    admins_normalized = [int(a) for a in initial_admins if str(a).strip()]
+    admins_normalized =[int(a) for a in initial_admins if str(a).strip()]
     if admins_normalized:
         save_admins(admins_normalized)
     return admins_normalized
@@ -60,7 +68,7 @@ def load_allowed_chats():
     if os.path.exists(ALLOWED_CHATS_FILE):
         with open(ALLOWED_CHATS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return []
+    return[]
 
 def save_allowed_chats(chats):
     with open(ALLOWED_CHATS_FILE, "w", encoding="utf-8") as f:
@@ -71,7 +79,7 @@ def load_pending_users():
     if os.path.exists(PENDING_USERS_FILE):
         with open(PENDING_USERS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return []
+    return[]
 
 def save_pending_users(users):
     with open(PENDING_USERS_FILE, "w", encoding="utf-8") as f:
@@ -82,7 +90,7 @@ def load_pending_chats():
     if os.path.exists(PENDING_CHATS_FILE):
         with open(PENDING_CHATS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return []
+    return[]
 
 def save_pending_chats(chats):
     with open(PENDING_CHATS_FILE, "w", encoding="utf-8") as f:
@@ -96,7 +104,7 @@ def is_admin(user_id):
 # Check if chat is allowed
 def is_chat_allowed(chat_id):
     allowed_chats = load_allowed_chats()
-    return str(chat_id) in [str(c.get('id')) for c in allowed_chats]
+    return str(chat_id) in[str(c.get('id')) for c in allowed_chats]
 
 async def handle_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle new member joining the chat"""
@@ -106,10 +114,17 @@ async def handle_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if update.message and update.message.new_chat_members:
         message_id = update.message.id
         job_queue = context.job_queue
+        
+        if not job_queue:
+            logger.error("JobQueue не инициализирован! Проверьте, установлена ли зависимость python-telegram-bot[job-queue].")
+            return
+
+        # Добавляем задачу на удаление через 300 секунд (5 минут)
         job_queue.run_once(delete_message, when=300, data={
             'chat_id': update.effective_chat.id,
             'message_id': message_id
         })
+        logger.info(f"Запланировано удаление сообщения {message_id} в чате {update.effective_chat.id} через 5 минут.")
 
 async def delete_message(context):
     """Delete a message after 5 minutes"""
@@ -117,8 +132,10 @@ async def delete_message(context):
     data = job.data
     try:
         await context.bot.delete_message(chat_id=data['chat_id'], message_id=data['message_id'])
-    except Exception:
-        pass
+        logger.info(f"Сообщение {data['message_id']} успешно удалено из чата {data['chat_id']}.")
+    except Exception as e:
+        # Теперь бот не будет молчать, если у него нет прав на удаление сообщений
+        logger.error(f"Ошибка при удалении сообщения {data['message_id']} в чате {data['chat_id']}: {e}")
 
 async def add_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add current chat to allowed list (admin only)"""
@@ -132,7 +149,7 @@ async def add_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_username = update.effective_chat.username
     
     allowed_chats = load_allowed_chats()
-    if str(chat_id) not in [str(c.get('id')) for c in allowed_chats]:
+    if str(chat_id) not in[str(c.get('id')) for c in allowed_chats]:
         allowed_chats.append({
             "id": chat_id,
             "title": chat_title,
@@ -150,7 +167,7 @@ async def add_me_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.full_name
     
     pending_users = load_pending_users()
-    if str(user_id) not in [str(u.get('id')) for u in pending_users]:
+    if str(user_id) not in[str(u.get('id')) for u in pending_users]:
         pending_users.append({"id": user_id, "name": user_name})
         save_pending_users(pending_users)
         await update.message.reply_text("Ваш запрос отправлен администратору\\. Ожидайте подтверждения\\.", parse_mode='MarkdownV2')
@@ -166,7 +183,7 @@ async def request_chat_command(update: Update, context: ContextTypes.DEFAULT_TYP
     chat_username = update.effective_chat.username
     
     pending_chats = load_pending_chats()
-    if str(chat_id) not in [str(c.get('id')) for c in pending_chats]:
+    if str(chat_id) not in[str(c.get('id')) for c in pending_chats]:
         pending_chats.append({
             "id": chat_id,
             "title": chat_title,
@@ -323,7 +340,7 @@ async def add_chat_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             save_pending_chats(pending_chats)
             
             allowed_chats = load_allowed_chats()
-            if str(target_chat_id) not in [str(c.get('id')) for c in allowed_chats]:
+            if str(target_chat_id) not in[str(c.get('id')) for c in allowed_chats]:
                 allowed_chats.append(target_chat)
                 save_allowed_chats(allowed_chats)
             
