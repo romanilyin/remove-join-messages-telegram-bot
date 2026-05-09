@@ -112,7 +112,7 @@ async def handle_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     if update.message and update.message.new_chat_members:
-        message_id = update.message.id
+        message_id = update.message.message.id
         job_queue = context.job_queue
         
         if not job_queue:
